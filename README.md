@@ -5,10 +5,56 @@ rotaciones de cultivos a 3 años para un campo de la Cuenca del Salado. El usuar
 cultivo anterior de cada lote, elige el partido y obtiene un **ranking de alternativas**,
 de la más a la menos conveniente según el margen bruto.
 
-> **Estado de los datos:** los rendimientos por partido son **reales** (Estimaciones Agrícolas
-> del Ministerio de Agricultura). Los demás valores (precios, costos, factores de suelo y de
-> antecesor, etc.) son **ilustrativos** y están pendientes de reemplazo. Ver la sección
-> [Datos pendientes](#datos-pendientes).
+> **Estado de los datos:** el Excel de ejemplo usa **datos reales** de la Cuenca del Salado
+> (Ministerio de Agricultura, informe de márgenes de septiembre 2026 y Estimaciones Agrícolas;
+> precios de fertilizantes de noviembre 2026) sobre un **establecimiento típico ficticio** (los
+> lotes son inventados). Los valores que no tienen una fuente directa están construidos con
+> supuestos declarados. Ver la sección [Datos: fuentes, cálculos y supuestos](#5-datos-fuentes-cálculos-y-supuestos).
+
+---
+
+## Contexto: la Cuenca del Salado
+
+### Qué es
+El río Salado nace en el sudeste de Santa Fe, atraviesa el centro de la provincia de Buenos Aires
+y desemboca en la Bahía de Samborombón, sobre el Río de la Plata. Se habla de "Cuenca del Salado"
+en dos sentidos:
+
+- **La cuenca hídrica completa**, que es el área que abarca el *Plan Maestro Integral de la Cuenca
+  del Río Salado*: unos **170.000 km²**, más de la mitad de la superficie de la provincia, con más
+  de un millón de habitantes y entre el 25% y el 30% de la producción de granos y carnes del país.
+- **La Cuenca baja o Depresión del Salado** (también llamada Pampa Deprimida o Pampa inundable),
+  que es la zona en la que se enfoca este trabajo: unos **6,5 millones de hectáreas**, alrededor
+  del 21% de la provincia.
+
+### Por qué es un caso interesante para optimizar
+- Es una llanura muy plana, con suelos hidromórficos (que se anegan) y halomórficos (salinos y
+  sódicos), y con ciclos alternados de inundaciones y sequías.
+- Por eso solo una parte del territorio, cerca del 29%, tiene aptitud agrícola; en el resto se
+  conservan pastizales naturales o pasturas. Es la principal zona de cría vacuna del país, con más
+  del 20% del stock bovino nacional.
+- En los últimos años la agricultura avanzó sobre las lomas de la región. Eso plantea justamente
+  la pregunta que responde este modelo: **cómo combinar cultivos agrícolas y pasturas** en los
+  distintos tipos de suelo de un mismo campo, sin caer en el monocultivo.
+
+Esto se refleja en el modelo: los lotes se clasifican en lomas (clase A), medias lomas (clase B) y
+bajos alcalinos (clase C, donde solo puede haber pastura), y se exige una superficie mínima de
+pastura.
+
+### Partidos incluidos en la app
+La cuenca abarca muchos partidos bonaerenses. La app trabaja con **12 partidos** de la región,
+para los que hay rendimientos en las Estimaciones Agrícolas del Ministerio de Agricultura:
+
+Ayacucho, Azul, Cañuelas, Castelli, Chascomús, Dolores, General Belgrano, General Juan Madariaga,
+Las Flores, Maipú, Rauch y Saladillo.
+
+Para sumar otro partido alcanza con agregar sus rendimientos a `Estimaciones.csv` y volver a
+generar el Excel (sección 5.7).
+
+*Fuentes del contexto:* Plan Maestro Integral de la Cuenca del Río Salado (Ministerio de
+Infraestructura de la Provincia de Buenos Aires); Jacobo et al. (FAUBA), sobre uso del suelo y
+pastizales en la Cuenca baja del Salado; trabajos de INTA y del Ministerio de Agricultura sobre
+sistemas ganaderos de la región.
 
 ---
 
@@ -184,42 +230,111 @@ haber subido el `datos_ejemplo.xlsx` ya actualizado.
 
 ---
 
-## 5. Datos pendientes
+## 5. Datos: fuentes, cálculos y supuestos
 
-| Dato | Hoja / lugar | Estado | Dónde conseguirlo |
+### 5.1 Cómo se arma el Excel de entrada
+1. Los valores están escritos en `make_template.py`, cada uno con un comentario que indica su
+   fuente y el cálculo que se hizo.
+2. Los rendimientos por partido no se escriben a mano: `importar_rendimientos.py` los calcula a
+   partir de `Estimaciones.csv` (descargado del Ministerio de Agricultura).
+3. `python make_template.py` junta todo y genera `datos_ejemplo.xlsx`, con 10 hojas: `LEEME`,
+   `lotes`, `aptitud`, `cultivos`, `composicion`, `precios`, `rendimientos_partido`,
+   `factor_clase`, `rotacion` y `parametros`.
+4. La app usa ese Excel como "Datos de ejemplo" y lo ofrece como plantilla descargable. Un usuario
+   real completa la misma plantilla con sus propios lotes.
+
+### 5.2 Criterios generales
+- **Una sola fuente y una sola fecha** para lo económico: el informe *Resultados Agrícolas.
+  Ingresos – Gastos – Márgenes* del Ministerio de Agricultura (septiembre 2026, campaña 2026/27),
+  tabla de la **región Cuenca del Salado**. Así precios, costos y márgenes son coherentes entre sí.
+- Todo en **USD**. Cuando un dato viene en pesos, se convierte con el dólar BCRA promedio de
+  septiembre 2026 (1.513,88 $/USD), el mismo que usa el informe.
+- El modelo maximiza **margen bruto en campo propio**: no incluye alquiler de la tierra ni gastos
+  de estructura.
+
+### 5.3 Datos tomados de fuentes (con el cálculo aplicado)
+
+| Dato | Hoja | Valor | Cómo se obtuvo |
 |---|---|---|---|
-| Rendimientos por partido (tn/ha) | `rendimientos_partido` | **Real** (promedio 2020/21-2025/26, excluye campañas sin dato) | Estimaciones Agrícolas, Min. de Agricultura |
-| **Precios** (USD/tn, netos de retenciones y flete) | `precios` en `make_template.py` | **Pendiente** (ilustrativo) | Mercado de Rosario / BCR, Matba-Rofex, Bolsa de Cereales |
-| **Costos directos** (USD/ha, sin fertilizante) | `cultivos` | **Pendiente** (ilustrativo) | Márgenes brutos de INTA, AACREA, Min. Desarrollo Agrario bonaerense |
-| Precio de fertilizantes (USD/kg de N y P₂O₅) | `parametros` | **Pendiente** (ilustrativo) | Publicaciones de costos e insumos |
-| Valor del forraje de la pastura (USD/ha) | `cultivos` (`ingreso_fijo_usd_ha`) | **Pendiente** (ilustrativo) | INTA Cuenca del Salado (margen de cría / alquiler ganadero) |
-| Factores de antecesor y N requerido | `rotacion` | **Pendiente** (ilustrativo) | Trabajos de INTA (EEA Cuenca del Salado, EEA Balcarce) |
-| Factor de rendimiento por clase de suelo | `factor_clase` | **Supuesto** (A=1,0; B=0,8; C=0,6) | Bibliografía INTA; aclarar como supuesto |
-| Aptitud de cada clase | `aptitud` | **Supuesto** | Cartas de suelos INTA (Visor GeoINTA) |
-| Partidos Rauch y Castelli | `rendimientos_partido` | **Faltan** (no estaban en el CSV) | Volver a descargar el CSV incluyendo esos departamentos |
-| Soja de 2ª en Dolores | `rendimientos_partido` | Solo 2 campañas con dato | Aclararlo en el informe o descartar el partido |
+| Rendimientos por partido (12 partidos) | `rendimientos_partido` | ej. Chascomús: maíz 7,20; soja 3,13; trigo 3,92; soja 2ª 1,98 tn/ha | Promedio de las campañas 2020/21 a 2025/26 de las Estimaciones Agrícolas, excluyendo campañas sin dato (rendimiento 0) |
+| Precio neto (USD/tn) | `precios` | soja 275,4; soja 2ª 270,1; maíz 141,3; trigo 159,4 | Precio a cosecha − (gastos de comercialización y cosecha ÷ rendimiento). Ej. soja: 360 − 262,2/3,10. El precio del informe es local, con retenciones ya descontadas |
+| Costo directo sin fertilizante (USD/ha) | `cultivos` | soja 234,7; maíz 390,0; trigo/soja 2ª 427,0 | Labores + semillas + fitosanitarios. Ej. maíz: 136,2 + 117,6 + 136,2 |
+| Precio del N | `parametros` | 1,30 USD/kg N | Urea mayorista 595–605 USD/t (Valor Soja / IF Ingeniería en Fertilizantes, 7/11/2026) ÷ 1000 ÷ 0,46 |
+| Precio del P | `parametros` | 1,65 USD/kg P₂O₅ | Fosfato monoamónico 850–870 USD/t CFR (misma fuente) ÷ 1000 ÷ 0,52. *Es precio de importación, no mayorista* |
+| P requerido soja | `cultivos` | 39 kg P₂O₅/ha | Gasto en fertilizante de la soja según el informe (65,0 USD/ha) ÷ 1,65 |
+| N requerido maíz tras soja | `rotacion` | 67 kg N/ha | (Gasto en fertilizante del maíz 153,4 − 40 kg P × 1,65) ÷ 1,30 |
+| N requerido trigo tras soja | `rotacion` | 77 kg N/ha | (Gasto en fertilizante del trigo 166,6 − 40 kg P × 1,65) ÷ 1,30 |
 
-### Si no se encuentran los precios
-- Tomar **valores de referencia** de una campaña y fuente concretas (por ejemplo, precio de pizarra
-  o futuros de la Bolsa de Cereales), restar retenciones y flete con porcentajes explícitos, y
-  **documentarlos como supuesto** en el informe.
-- Hacer un **análisis de sensibilidad**: correr el modelo con precios ±10 % y mostrar si la
-  rotación óptima cambia. Es un buen argumento aunque los precios no sean exactos.
-- Dejar siempre registrado el año de cada precio, para no mezclar campañas.
+### 5.4 Datos construidos con supuestos (y por qué)
 
-### Cómo cargar los datos reales
-1. Editar los valores en `make_template.py` (precios, costos, parámetros, factores).
+| Dato | Valor | Supuesto y justificación |
+|---|---|---|
+| P requerido maíz y trigo | 40 kg P₂O₅/ha | Dosis típica. El informe da el gasto total en fertilizante, no cómo se reparte entre N y P, así que hay que fijar uno de los dos |
+| P requerido trigo/soja 2ª | 51 kg P₂O₅/ha | 40 (trigo) + 18,6 USD/ha de la soja 2ª ÷ 1,65 |
+| Pastura: tipo | con leguminosas (lotus tenuis, trébol blanco) | Son las leguminosas adaptadas a los bajos del Salado. Aportan N por fijación biológica (INTA EEA Cuenca del Salado, 2025) |
+| Pastura: ingreso | 190 USD/ha/año | No se modela ganado: la pastura se valora por lo que pagaría un ganadero por usarla (**alquiler ganadero**). 70 kg de novillo/ha/año × 4.110 $/kg (novillo MAG Cañuelas, promedio octubre 2026) ÷ 1.513,88 $/USD. Como referencia, el margen de la cría con hacienda propia en la región ronda los 250 USD/ha |
+| Pastura: costo | 80 USD/ha/año | El modelo trata la pastura como anual, así que la implantación se reparte en 4 años de vida útil: (semillas 125 + labores 115,4) ÷ 4 ≈ 60, más ≈ 20 de mantenimiento |
+| Pastura: P | 10 kg P₂O₅/ha/año | 90 kg/ha de fosfato diamónico a la siembra (dosis de INTA EEA Cuenca del Salado para suelos con < 6 ppm de P) = 41 kg P₂O₅ ÷ 4 años |
+| N según antecesor | maíz: 75 tras trigo/soja, 35 tras pastura; trigo: 90 tras maíz, 40 tras pastura | Ajustes sobre los valores calibrados: −50% tras pastura con leguminosa (aporte de N), +15% trigo tras maíz (el rastrojo de maíz inmoviliza N), +10% maíz tras trigo/soja |
+| Factor de rendimiento por antecesor | soja tras maíz 1,05; tras pastura 1,05 a 1,08; trigo tras maíz 0,97 | La literatura da ≈ +10% para soja sobre maíz frente a soja sobre soja; se usa la mitad porque el rendimiento base ya es un promedio de lotes con distintos antecesores. Mejora tras pastura: ensayos de la Chacra Experimental Barrow |
+| Tope de soja / mínimo de gramíneas | 0,35 / 0,20 de la superficie total | Regla de rotación balanceada (≈ 50% gramíneas y 50% soja en la parte agrícola), relajada para dejar margen de decisión: sobre el 60% agrícola equivale a soja ≤ 58% y gramíneas ≥ 33% |
+| Mínimo de pastura | 0,40 | Conservador para la región: solo ≈ 29% de la cuenca tiene aptitud agrícola y se conserva entre 53% y 89% de pastizales |
+| Tope de N y presupuesto de fertilizante | 0 (sin tope) | Escenario base sin restricción financiera. El presupuesto se analiza en la sensibilidad |
+| Factor por clase de suelo | A 1,0; B 0,8; C 0,6 | Las clases B y C tienen limitaciones de drenaje y sodicidad. Se analiza en la sensibilidad |
+| Aptitud | clase C: solo pastura | Bajos alcalinos, no aptos para agricultura |
+| Lotes | 10 lotes, 1.600 ha | Establecimiento típico ficticio; 34% de la superficie es clase C, coherente con la región |
+
+### 5.5 Validación contra el Ministerio
+Con estos datos, el margen bruto por hectárea que calcula el modelo (lote clase A, Chascomús)
+reproduce el del informe para la Cuenca del Salado:
+
+| Cultivo | Modelo (USD/ha) | Ministerio (USD/ha) | Fertilizante modelo / Ministerio |
+|---|---|---|---|
+| Maíz (tras soja) | 474 | 472 | 153,1 / 153,4 |
+| Trigo/soja 2ª (tras soja) | 548 | 555 | 184,2 / 185,3 |
+| Soja (tras maíz) | 606 (563 sin efecto antecesor) | 553 | 64,3 / 65,0 |
+
+### 5.6 Observaciones sobre los rendimientos
+- En **Dolores** hay pocas campañas con dato (soja 2ª: 2; maíz: 3). Sus resultados son menos
+  confiables.
+- Cañuelas figura como "Canuelas" porque el CSV no trae la ñ.
+
+### 5.7 Cómo actualizar los datos
+1. Editar los valores en `make_template.py`, actualizando también el comentario con la fuente.
 2. Correr `python make_template.py` y comprobar que muestre *"Rendimientos reales cargados"*.
 3. Abrir la app, verificar que los resultados tengan sentido y subir los cambios con Git.
 
+### 5.8 Fuentes
+- Ministerio de Agricultura, Ganadería y Pesca. *Resultados Agrícolas. Ingresos – Gastos –
+  Márgenes*, septiembre 2026 (campaña 2026/27), región Cuenca del Salado.
+- Ministerio de Agricultura. *Estimaciones Agrícolas* por departamento, campañas 2020/21 a 2025/26
+  (`Estimaciones.csv`).
+- Valor Soja / Bichos de Campo, en base a IF Ingeniería en Fertilizantes: precios de urea y
+  fosfatos, 7 de noviembre de 2026.
+- Mercado Agroganadero de Cañuelas: precio promedio del novillo, octubre 2026.
+- Antonelli, Bailleres, Taboada y otros (INTA EEA Cuenca del Salado). Fijación biológica de
+  nitrógeno de *Lotus tenuis* en la Pampa Deprimida. *Farming System* 3(1), 100122, 2025.
+- Borrajo, C. I. (INTA EEA Cuenca del Salado). *Implantación de pastura para sistemas ganaderos
+  sustentables*, 2026.
+- Chacra Experimental Integrada Barrow (MDA-INTA): efecto de pasturas de alfalfa sobre los
+  cultivos siguientes.
+- Efecto antecesor maíz sobre soja (≈ +10%): Barraco et al. 2017; Lattanzi 1989 y 2005;
+  Alvarez et al. 2017.
+- Rotación balanceada: INTA; SEDICI-UNLP. Uso del suelo en la cuenca: Jacobo et al. (FAUBA).
+
 ---
 
-## 6. Limitaciones y supuestos
+## 6. Limitaciones y supuestos del modelo
 - Un solo cultivo principal por lote y año; no hay ganadería explícita (la pastura se valora con un
-  ingreso fijo por hectárea).
+  ingreso fijo por hectárea, el alquiler ganadero).
+- La pastura se decide año a año, aunque en la realidad dura varios años; por eso su costo de
+  implantación se reparte en su vida útil.
+- **Fin de horizonte:** el modelo planifica 3 años y no considera qué pasa en el año 4, así que en
+  el último año puede elegir un cultivo que deje el lote en peores condiciones.
+- El trigo/soja 2ª pertenece al grupo "soja": cuenta para el tope de soja y no para el mínimo de
+  gramíneas, aunque incluye trigo (cada cultivo pertenece a un solo grupo).
 - Los rendimientos por partido promedian todos los suelos; el modelo los usa como valor de la
   clase de referencia y los ajusta con `factor_clase`.
 - La fertilización queda fijada en el mínimo requerido (no hay curva de respuesta del rendimiento
   al fertilizante).
-- Los factores de antecesor y las demandas de N son aproximaciones que deben respaldarse con
-  bibliografía.
+- Precios y costos son de una sola fecha; su variación se estudia en el análisis de sensibilidad.

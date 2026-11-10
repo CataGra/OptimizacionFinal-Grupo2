@@ -1,0 +1,14 @@
+# Tema visual de la app: colores tomados del paisaje de la Cuenca del Salado.
+[theme]
+base = "light"
+primaryColor = "#4F6F43"              # verde pastura (botones, sliders, selección)
+backgroundColor = "#F6F7F3"
+secondaryBackgroundColor = "#EEF1EA"  # barra lateral y fondos de controles
+textColor = "#2E3A2F"                 # verde casi negro (tierra húmeda)
+font = "Public Sans:https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600&display=swap, sans-serif"
+headingFont = "Newsreader:https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap, serif"
+baseRadius = "0.4rem"
+chartCategoricalColors = ["#D9A93B", "#5E7F4F", "#A8794A", "#C8B273"]
+
+[client]
+toolbarMode = "viewer"
