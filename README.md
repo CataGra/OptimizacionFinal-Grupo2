@@ -323,8 +323,83 @@ reproduce el del informe para la Cuenca del Salado:
 - Rotación balanceada: INTA; SEDICI-UNLP. Uso del suelo en la cuenca: Jacobo et al. (FAUBA).
 
 ---
+## 6. Análisis de sensibilidad
 
-## 6. Limitaciones y supuestos del modelo
+### Qué es y para qué sirve
+
+Muchos valores del modelo son supuestos (topes de manejo, factores de rendimiento, precios, ingreso de la pastura). El análisis de sensibilidad mide **cuánto cambian el margen bruto total y el plan de siembra cuando uno de esos valores resulta distinto de lo previsto**. Permite identificar qué supuestos condicionan realmente la decisión y cuáles casi no influyen.
+
+### Cómo funciona
+
+1. Se resuelve el **escenario base**: la rotación óptima con los datos cargados.
+2. Para cada parámetro se recorre una serie de valores alrededor del valor base, **modificando solo ese parámetro** y dejando el resto igual, y se vuelve a optimizar.
+3. Cada resultado se compara con el escenario base: variación del margen, decisiones de siembra que cambian y superficie por cultivo.
+
+Los valores base se toman de los datos cargados, por lo que el análisis funciona tanto con el Excel de ejemplo como con un Excel propio. Se aplica a la rotación óptima (no al resto del ranking de alternativas).
+
+### Parámetros analizados
+
+| Grupo | Parámetro | Qué se modifica |
+| --- | --- | --- |
+| Restricciones de manejo | Presupuesto de fertilizante | Tope anual de gasto, como porcentaje del gasto del plan base |
+| | Mínimo de pastura | Superficie mínima con pastura cada año |
+| | Tope de soja | Superficie máxima del grupo soja (soja y trigo/soja 2ª) |
+| | Mínimo de gramíneas | Superficie mínima del grupo gramíneas (maíz) |
+| Suelo y rotación | Rendimiento de la clase de suelo | Factor de rendimiento de las clases con limitaciones (clase B en el ejemplo) |
+| | Efecto del antecesor | Escala los factores de rendimiento por cultivo anterior (0 los anula, 1 es el valor base, 2 los duplica) |
+| Precios e ingresos | Precio de la soja, del maíz y del trigo | Multiplicador sobre el precio neto de cada producto |
+| | Precio de los fertilizantes | Multiplicador sobre el precio del N y del P |
+| | Ingreso de la pastura | Ingreso por hectárea (alquiler ganadero) |
+
+El factor de la clase C no se analiza porque en esa clase solo hay pastura, cuyo ingreso es fijo por hectárea y no depende del factor. Si un parámetro no existe en el Excel cargado (por ejemplo, un producto con otro nombre), simplemente se omite.
+
+### Resultados que se obtienen
+
+- **Margen total** y su variación respecto del base (en USD y en %).
+- **Plan de siembra:** cuántas decisiones (lote, año) difieren del plan base y en qué tramo de valores el plan base se mantiene sin cambios.
+- **Superficie promedio por cultivo** en cada escenario.
+- **Gasto en fertilizante** de cada escenario.
+- **Escenarios sin solución:** valores para los que el modelo no tiene ninguna rotación posible.
+- **Diagnóstico de restricciones:** para el mínimo de pastura, el tope de soja y el mínimo de gramíneas se afloja la restricción un paso y se mide cuánto mejora el margen. La conclusión es *No limita*, *Limita poco* o *Limita*.
+
+### Cómo interpretar los resultados
+
+Hay dos preguntas distintas:
+
+- **¿Cambia el margen?** Indica cuánto está en juego si el supuesto resulta incorrecto.
+- **¿Cambia el plan?** Indica si la recomendación es robusta: si el plan se mantiene ante variaciones razonables del parámetro, la decisión no depende de ese supuesto.
+
+Una restricción que no limita (aflojarla no mejora el margen) no condiciona la decisión, porque el plan ya la cumple con holgura. Una restricción que limita tiene un costo concreto en margen, y es la que conviene justificar.
+
+### Cómo usarlo
+
+**Desde la app:** después de apretar **Calcular rotaciones**, abrir la pestaña **Sensibilidad** y apretar **Calcular sensibilidad**. Son unos 70 cálculos y suele tardar menos de un minuto. La pestaña tiene tres secciones:
+
+- **Resumen:** indicadores generales, lectura rápida, gráfico de impacto por parámetro, tabla resumen y diagnóstico de restricciones.
+- **Por parámetro:** gráfico del margen, gráfico de superficie por cultivo y tabla de escenarios del parámetro elegido.
+- **Tabla completa:** todos los escenarios juntos y descarga en Excel.
+
+El análisis se calcula para el partido elegido, con los lotes y parámetros cargados en ese momento. Si se cambian, hay que volver a calcular las rotaciones y la sensibilidad.
+
+**Desde la terminal** (genera un Excel y un gráfico por parámetro en la carpeta `resultados_sensibilidad/`):
+
+```
+python sensibilidad.py
+python sensibilidad.py --partido Rauch
+```
+
+Los gráficos PNG requieren matplotlib (`pip install matplotlib`), que no está en `requirements.txt` porque la app no lo necesita.
+
+### Alcance
+
+- Se modifica **un parámetro por vez**: no se capturan efectos combinados (por ejemplo, un cambio simultáneo del precio de la soja y del fertilizante).
+- Es una sensibilidad por **re-optimización**. No es el análisis clásico de precios sombra y rangos de factibilidad del simplex, que no se aplica de la misma forma a un modelo con variables binarias.
+- Los rangos probados son valores representativos alrededor del base y **no son comparables entre parámetros**: no equivale variar un precio ±30 % que un presupuesto de fertilizante.
+- Solo se analiza la solución óptima. Si dos planes distintos dan el mismo margen, el análisis puede marcar decisiones distintas aunque se trate de un empate y no de un cambio real de estrategia.
+- Los resultados dependen del partido y de los datos cargados.
+---
+
+## 7. Limitaciones y supuestos del modelo
 - Un solo cultivo principal por lote y año; no hay ganadería explícita (la pastura se valora con un
   ingreso fijo por hectárea, el alquiler ganadero).
 - La pastura se decide año a año, aunque en la realidad dura varios años; por eso su costo de
