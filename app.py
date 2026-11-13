@@ -14,6 +14,20 @@ import pandas as pd
 import streamlit as st
 
 import model as M
+import sensibilidad as S
+
+# Compatibilidad con Streamlit < 1.52 (la última que corre en Python 3.9 es la 1.50): ahí
+# st.altair_chart no acepta width="stretch", así que se traduce a use_container_width=True.
+import inspect
+if "width" not in inspect.signature(st.altair_chart).parameters:
+    _altair_chart = st.altair_chart
+
+    def _altair_compat(chart, *args, width=None, **kwargs):
+        if width == "stretch":
+            kwargs["use_container_width"] = True
+        return _altair_chart(chart, *args, **kwargs)
+
+    st.altair_chart = _altair_compat
 
 st.set_page_config(page_title="Rotación de cultivos - Cuenca del Salado",
                    page_icon=":material/grass:", layout="wide")
@@ -216,6 +230,272 @@ def resumen(d, plan, det, sols, sel, ha_tot, T):
     st.markdown(f'<div class="resumen">{txt}</div>', unsafe_allow_html=True)
 
 
+# ----------------------------------------------------------------------------
+# Pestaña "Sensibilidad": cuánto cambia el resultado si un supuesto cambia
+# ----------------------------------------------------------------------------
+COLOR_GRUPO = {"manejo": VERDE, "suelo": "#A8794A", "precios": "#7C8C9A"}
+COLOR_BASE = "#D9A93B"
+COLOR_ALERTA = "#B5483A"
+TINTE_CONCLUSION = {"Limita": "#F3E2AE", "Limita poco": "#EEE6CB", "No limita": "#D5E0CB"}
+
+
+def con_signo(v, dec=1):
+    """Porcentaje con signo y formato argentino: +4,1 % / -3,9 %."""
+    v = 0.0 if abs(v) < 0.5 * 10 ** -dec else v
+    return ("+" if v > 0 else "") + num(v, dec) + " %"
+
+
+def usd_signo(v):
+    return ("+" if v > 0 else "") + num(v)
+
+
+def sens_excel(sens):
+    buf = io.BytesIO()
+    S.exportar_excel(buf, sens)
+    return buf.getvalue()
+
+
+def resaltar_filas(fila):
+    """Marca la fila del valor base y atenúa los escenarios sin solución."""
+    if fila["Plan de siembra"] == "Valor base":
+        estilo = f"background-color: {TINTE['pastura']}; font-weight: 600; color: {TEXTO}"
+    elif fila["Plan de siembra"] == "Sin solución":
+        estilo = f"color: {COLOR_ALERTA}"
+    else:
+        estilo = ""
+    return [estilo] * len(fila)
+
+
+def tabla_escenarios(df, cultivos, con_parametro=False):
+    """Tabla legible de escenarios (un parámetro o todos juntos)."""
+    t = df.copy()
+    t["Valor"] = t["etiqueta"] + t["es_base"].map({True: "  (base)", False: ""})
+    pct = [f"pct_{c}" for c in cultivos if f"pct_{c}" in t.columns]
+    cols = (["Parámetro"] if con_parametro else []) + ["Valor", "margen_total_usd", "var_margen_usd",
+                                                      "var_margen_pct", "plan"] + pct
+    t = t[cols].rename(columns={"margen_total_usd": "Margen total (USD)",
+                                "var_margen_usd": "Diferencia (USD)",
+                                "var_margen_pct": "Diferencia (%)", "plan": "Plan de siembra",
+                                **{f"pct_{c}": f"{nombre(c)} (%)" for c in cultivos}})
+    fmt = {"Margen total (USD)": num, "Diferencia (USD)": usd_signo, "Diferencia (%)": con_signo,
+           **{f"{nombre(c)} (%)": (lambda v: num(v, 1)) for c in cultivos}}
+    return t.style.apply(resaltar_filas, axis=1).format(
+        {k: v for k, v in fmt.items() if k in t.columns}, na_rep="—")
+
+
+def pestana_sensibilidad(res, t_lim):
+    d = res["d"]
+    partido, T = d["partido"], int(d["par"]["anios"])
+    st.markdown(
+        '<div class="resumen"><p><b>Qué muestra esta pestaña</b></p>'
+        '<p>Cuánto cambia el resultado si un supuesto del modelo resulta distinto de lo previsto. '
+        'Se mueve <b>un parámetro por vez</b> (restricciones de manejo, suelo y rotación, precios), '
+        'se vuelve a optimizar y se compara con la rotación óptima.</p></div>',
+        unsafe_allow_html=True)
+    st.write("")
+
+    sens = res.get("sens")
+    if st.button("Recalcular sensibilidad" if sens else "Calcular sensibilidad",
+                 icon=":material/query_stats:", key="btn_sens"):
+        barra = st.progress(0.0, text="Preparando el análisis...")
+
+        def avance(i, n, titulo):
+            barra.progress(i / n, text=f"{titulo} (cálculo {i} de {n})")
+
+        try:
+            res["sens"] = S.analizar(res["datos"], partido, t_lim, avance)
+        except ValueError as e:
+            barra.empty()
+            st.error(str(e))
+            return
+        barra.empty()
+        sens = res["sens"]
+
+    if not sens:
+        st.caption("Son unos 70 cálculos y suele tardar menos de un minuto.")
+        st.markdown('<div class="vacio">El análisis de sensibilidad evalúa cómo varían el margen bruto '
+                    'total y el plan de siembra al modificar, de a uno, los parámetros del modelo: '
+                    'restricciones de manejo, rendimiento y rotación, y precios e ingresos.</div>',
+                    unsafe_allow_html=True)
+        return
+
+    r, restr, escs = sens["resumen"], sens["restricciones"], sens["escs"]
+    aplicar_de = lambda sty: sty.map if hasattr(sty, "map") else sty.applymap   # compat. pandas < 2.1
+    t_res, t_par, t_tab = st.tabs(["Resumen", "Por parámetro", "Tabla completa"])
+
+    # ---------------------------------------------------------------- Resumen
+    with t_res:
+        n_lim = int((restr["conclusion"] != "No limita").sum()) if len(restr) else 0
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric(f"Margen base en {T} años (USD)", num(sens["base_obj"]), border=True)
+        m2.metric("Parámetros analizados", str(len(r)), border=True)
+        m3.metric("Cálculos realizados", str(int(r["total_escenarios"].sum())), border=True)
+        m4.metric("Restricciones que limitan", f"{n_lim} de {len(restr)}", border=True)
+        st.write("")
+
+        orden = r.sort_values("rango_pct", ascending=False)
+        items = [f"<p><b>Lo que más mueve el margen:</b> "
+                 f"{lista([f'<b>{t}</b>' for t in orden['titulo'].head(3)])}.</p>"]
+        poco = list(orden.loc[orden["rango_pct"] < 2, "titulo"])
+        if poco:
+            items.append(f"<p><b>Casi no influye:</b> {lista(poco)}.</p>")
+        if len(restr):
+            lim = [f"<b>{x.restriccion}</b> (aflojarla a {x.se_afloja_a} mejora el margen "
+                   f"{con_signo(x.mejora_pct)})" for x in restr.itertuples() if x.conclusion == "Limita"]
+            lim_poco = [x.restriccion for x in restr.itertuples() if x.conclusion == "Limita poco"]
+            no_lim = [x.restriccion for x in restr.itertuples() if x.conclusion == "No limita"]
+            if lim:
+                items.append(f"<p><b>Restricciones que limitan:</b> {lista(lim)}.</p>")
+            if lim_poco:
+                items.append(f"<p><b>Limitan muy poco:</b> {lista(lim_poco)}.</p>")
+            if no_lim:
+                items.append(f"<p><b>No limitan:</b> {lista(no_lim)}. El plan ya las cumple con holgura.</p>")
+        sin = []
+        for e in escs:
+            malos = sens["resultados"][e["key"]]
+            malos = list(malos.loc[malos["estado"] != "ok", "etiqueta"])
+            if malos:
+                sin.append(f"{e['titulo']} con {lista(malos)}")
+        if sin:
+            items.append(f"<p><b>Sin solución:</b> {lista(sin)}.</p>")
+        st.markdown(f'<div class="resumen">{"".join(items)}</div>', unsafe_allow_html=True)
+        st.write("")
+
+        st.markdown("**Cuánto mueve cada parámetro el margen total**")
+        graf = alt.Chart(r).mark_bar(size=18, cornerRadius=2).encode(
+            y=alt.Y("titulo:N", sort=alt.EncodingSortField("rango_pct", order="descending"), title=None),
+            x=alt.X("var_min_pct:Q", title="Variación del margen total respecto del base (%)"),
+            x2="var_max_pct:Q",
+            color=alt.Color("grupo_nombre:N", legend=alt.Legend(orient="bottom", title=None),
+                            scale=alt.Scale(domain=list(S.GRUPOS.values()),
+                                            range=[COLOR_GRUPO[k] for k in S.GRUPOS])),
+            tooltip=[alt.Tooltip("titulo:N", title="Parámetro"),
+                     alt.Tooltip("rango_probado:N", title="Rango probado"),
+                     alt.Tooltip("var_min_pct:Q", title="Peor caso (%)", format="+.1f"),
+                     alt.Tooltip("var_max_pct:Q", title="Mejor caso (%)", format="+.1f")])
+        cero = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(color=TEXTO, strokeDash=[3, 3]).encode(x="x:Q")
+        st.altair_chart((graf + cero).properties(height=32 * len(r) + 50), width="stretch")
+        st.caption("Cada barra va del peor al mejor caso dentro del rango probado de ese parámetro. "
+                   "Los rangos no son comparables entre sí: un precio probado de ×0,7 a ×1,3 no equivale "
+                   "a un presupuesto de 50 a 100 %.")
+
+        st.markdown("**Resumen por parámetro**")
+        tab = r[["titulo", "grupo_nombre", "valor_base", "rango_probado", "var_min_pct", "var_max_pct",
+                 "plan_estable", "escenarios_infactibles"]].rename(columns={
+            "titulo": "Parámetro", "grupo_nombre": "Grupo", "valor_base": "Valor base",
+            "rango_probado": "Rango probado", "var_min_pct": "Peor caso (margen)",
+            "var_max_pct": "Mejor caso (margen)", "plan_estable": "El plan base se mantiene con",
+            "escenarios_infactibles": "Sin solución"})
+        st.dataframe(tab.style.format({
+            "Peor caso (margen)": con_signo, "Mejor caso (margen)": con_signo,
+            "Sin solución": lambda v: "—" if v == 0 else f"{v} " + ("valor" if v == 1 else "valores")}),
+            width="stretch", hide_index=True)
+        st.caption("«El plan base se mantiene» indica el tramo, alrededor del valor base, en el que la "
+                   "rotación óptima no cambia ninguna decisión.")
+
+        if len(restr):
+            st.markdown("**¿Las restricciones de manejo realmente limitan?**")
+            tr = restr[["restriccion", "valor_actual", "se_afloja_a", "mejora_usd", "mejora_pct",
+                        "conclusion"]].rename(columns={
+                "restriccion": "Restricción", "valor_actual": "Valor actual",
+                "se_afloja_a": "Si se afloja a", "mejora_usd": "Mejora del margen (USD)",
+                "mejora_pct": "Mejora (%)", "conclusion": "Conclusión"})
+            sty = tr.style.format({"Mejora del margen (USD)": num, "Mejora (%)": con_signo})
+            sty = aplicar_de(sty)(lambda x: f"background-color: {TINTE_CONCLUSION.get(x, '')}; "
+                                            f"color: {TEXTO}", subset=["Conclusión"])
+            st.dataframe(sty, width="stretch", hide_index=True)
+            st.caption("Se afloja la restricción un paso y se mide cuánto mejora el margen. «No limita» "
+                       "significa que el plan ya la cumple con holgura; una que limita tiene un costo "
+                       "concreto en margen.")
+
+    # ------------------------------------------------------------ Por parámetro
+    with t_par:
+        grupos = [g for g in S.GRUPOS if any(e["grupo"] == g for e in escs)]
+        g = st.radio("Grupo", grupos, format_func=lambda k: S.GRUPOS[k], horizontal=True, key="sens_grupo")
+        claves = [e["key"] for e in escs if e["grupo"] == g]
+        por_clave = {e["key"]: e for e in escs}
+        k = st.selectbox("Parámetro", claves, format_func=lambda x: por_clave[x]["titulo"],
+                         key=f"sens_par_{g}")
+        esc, df = por_clave[k], sens["resultados"][k]
+        ok = df[df["estado"] == "ok"]
+        fila_r = r[r["parametro"] == k].iloc[0]
+
+        st.subheader(esc["titulo"], anchor=False)
+        st.markdown(f'<p class="paso">{esc["desc"]}</p>', unsafe_allow_html=True)
+
+        peor, mejor = ok.loc[ok["margen_total_usd"].idxmin()], ok.loc[ok["margen_total_usd"].idxmax()]
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Valor base", S.fmt_valor(esc["base"], esc["fmt"]), border=True)
+        for col, titulo, x in [(c2, "Peor caso", peor), (c3, "Mejor caso", mejor)]:
+            col.metric(f"{titulo} ({x['etiqueta']})", num(x["margen_total_usd"]),
+                       con_signo(x["var_margen_pct"]),
+                       delta_color="off" if abs(x["var_margen_pct"]) < 0.05 else "normal", border=True)
+        nota = f"El plan de siembra se mantiene idéntico al base con: <b>{fila_r['plan_estable']}</b>."
+        malos = list(df.loc[df["estado"] != "ok", "etiqueta"])
+        if malos:
+            nota += f" Sin solución con: <b>{lista(malos)}</b>."
+        st.markdown(f'<p class="paso" style="margin-top:.6rem">{nota}</p>', unsafe_allow_html=True)
+
+        orden = list(df.sort_values("valor")["etiqueta"])
+        eje_x = alt.X("etiqueta:N", sort=orden, title=esc["eje"], axis=alt.Axis(labelAngle=0))
+        a, b = st.columns(2)
+        with a:
+            st.markdown("**Margen bruto total (USD)**")
+            ejes = dict(x=eje_x, y=alt.Y("margen_total_usd:Q", title="USD", scale=alt.Scale(zero=False),
+                                         axis=alt.Axis(labelExpr=EJE_AR)))
+            capas = [
+                alt.Chart(ok).mark_line(color=VERDE, point=alt.OverlayMarkDef(color=VERDE, size=60, filled=True)
+                                        ).encode(**ejes, tooltip=[
+                    alt.Tooltip("etiqueta:N", title="Valor"),
+                    alt.Tooltip("margen_total_usd:Q", title="Margen (USD)", format=",.0f"),
+                    alt.Tooltip("var_margen_pct:Q", title="Diferencia (%)", format="+.1f")]),
+                alt.Chart(ok[ok["es_base"]]).mark_point(shape="diamond", size=260, filled=True,
+                                                        color=COLOR_BASE, stroke=TEXTO, strokeWidth=1.2
+                                                        ).encode(**ejes)]
+            if malos:
+                sin = df[df["estado"] != "ok"].assign(margen_total_usd=ok["margen_total_usd"].min())
+                capas.append(alt.Chart(sin).mark_text(text="sin solución", color=COLOR_ALERTA, fontSize=12,
+                                                      dy=-10).encode(**ejes))
+            st.altair_chart(alt.layer(*capas).properties(height=300), width="stretch")
+            st.caption("El rombo amarillo marca el valor base.")
+        with b:
+            st.markdown("**Superficie promedio por cultivo (% del campo)**")
+            cult = d["cultivos"]
+            comp = ok.melt(id_vars=["etiqueta"], value_vars=[f"pct_{c}" for c in cult],
+                           var_name="cultivo", value_name="pct")
+            comp["Cultivo"] = comp["cultivo"].str[4:].map(nombre)
+            st.altair_chart(alt.Chart(comp).mark_bar().encode(
+                x=eje_x,
+                y=alt.Y("pct:Q", title="% de la superficie", stack="zero", scale=alt.Scale(domain=[0, 100])),
+                color=alt.Color("Cultivo:N", scale=alt.Scale(domain=[nombre(c) for c in cult],
+                                                             range=[color(c) for c in cult]),
+                                legend=alt.Legend(orient="bottom", title=None)),
+                tooltip=[alt.Tooltip("etiqueta:N", title="Valor"), "Cultivo",
+                         alt.Tooltip("pct:Q", title="% de la superficie", format=".1f")],
+            ).properties(height=300), width="stretch")
+            st.caption("Promedio de los años del horizonte.")
+
+        st.markdown("**Escenarios probados**")
+        st.dataframe(tabla_escenarios(df, cult), width="stretch", hide_index=True)
+        st.caption("La fila resaltada es el escenario base. Si el margen es igual al del base pero el plan "
+                   "cambia, hay planes equivalentes (un empate) y no un cambio real de estrategia.")
+
+    # ---------------------------------------------------------- Tabla completa
+    with t_tab:
+        partes = []
+        for e in escs:
+            x = sens["resultados"][e["key"]].copy()
+            x.insert(0, "Parámetro", e["titulo"])
+            partes.append(x)
+        todo = pd.concat(partes, ignore_index=True)
+        st.dataframe(tabla_escenarios(todo, d["cultivos"], con_parametro=True), width="stretch",
+                     hide_index=True, height=520)
+        st.caption("Todos los escenarios de todos los parámetros. El Excel incluye además el plan base, "
+                   "su detalle por lote y año y una hoja por parámetro.")
+        st.download_button("Descargar sensibilidad (Excel)", sens_excel(sens),
+                           file_name=f"sensibilidad_{partido}.xlsx", icon=":material/download:")
+
+
 portada()
 
 # ----------------------------------------------------------------------------
@@ -320,7 +600,8 @@ if st.button("Calcular rotaciones", type="primary", icon=":material/calculate:")
                      "o revisá que el cultivo anterior de cada lote tenga rotaciones permitidas.")
             st.session_state.pop("res", None)
         else:
-            st.session_state["res"] = dict(d=d, sols=sols, dets=[M.evaluate(d, s["plan"]) for s in sols])
+            st.session_state["res"] = dict(d=d, sols=sols, dets=[M.evaluate(d, s["plan"]) for s in sols],
+                                          datos=datos)
 
 # ----------------------------------------------------------------------------
 # Resultados
@@ -362,8 +643,9 @@ else:
     resumen(d, plan, det, sols, sel, ha_tot, T)
     st.write("")
 
-    t_plan, t_rank, t_sup, t_fert = st.tabs(["Plan de rotación", "Ranking de alternativas",
-                                              "Superficie y márgenes", "Fertilización"])
+    t_plan, t_rank, t_sup, t_fert, t_sens = st.tabs(["Plan de rotación", "Ranking de alternativas",
+                                                      "Superficie y márgenes", "Fertilización",
+                                                      "Sensibilidad"])
 
     with t_plan:
         anos = [f"Año {t}" for t in range(1, T + 1)]
@@ -441,6 +723,9 @@ else:
             "Margen (USD/ha)": num, "Margen del lote (USD)": num}),
             width="stretch", hide_index=True)
         st.caption("Dosis mínimas para cubrir el requerimiento de cada cultivo según su antecesor.")
+
+    with t_sens:
+        pestana_sensibilidad(res, t_lim)
 
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as xw:
