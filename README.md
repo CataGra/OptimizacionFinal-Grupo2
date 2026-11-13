@@ -399,7 +399,29 @@ Los gráficos PNG requieren matplotlib (`pip install matplotlib`), que no está 
 - Los resultados dependen del partido y de los datos cargados.
 ---
 
-## 7. Limitaciones y supuestos del modelo
+## 7. Análisis de robustez (opcional, por consola)
+
+`robustez.py` complementa a `sensibilidad.py`: en vez de mover un parámetro por vez,
+perturba varios a la vez (precios de soja, maíz y trigo, precio de los fertilizantes e
+ingreso de la pastura) mediante multiplicadores log-normales de media 1, en N escenarios
+aleatorios. En cada escenario evalúa los planes del ranking sin re-optimizar y los compara
+con el plan ideal para ese escenario (arrastre o *regret*). Usa `model.py` y
+`sensibilidad.py` sin modificarlos; no forma parte de la app de Streamlit.
+
+```bash
+python robustez.py                                   # Chascomús, 300 escenarios, semilla 2026
+python robustez.py --partido Rauch --n 500 --semilla 7 --sigma 1.5
+```
+
+Opciones: `--excel`, `--partido`, `--n` (escenarios), `--semilla`, `--sigma` (escala de la
+incertidumbre, 1 = base), `--alt` (alternativas del ranking a comparar) y `--salida`
+(carpeta de resultados, por defecto `resultados_robustez/`).
+
+Genera `escenarios.csv` (un renglón por escenario) y `resumen_robustez.csv` (una fila por
+plan: margen medio, desvío, 5 % peor, CVaR5, arrastre medio, etc.) y muestra el resumen por pantalla.
+
+---
+## 8. Limitaciones y supuestos del modelo
 - Un solo cultivo principal por lote y año; no hay ganadería explícita (la pastura se valora con un
   ingreso fijo por hectárea, el alquiler ganadero).
 - La pastura se decide año a año, aunque en la realidad dura varios años; por eso su costo de
